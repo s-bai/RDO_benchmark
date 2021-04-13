@@ -1,109 +1,112 @@
 function rdo_benchmark()
     %% This function implements the RDO of a 2D three-bar truss
+    % Note:
+    %       Remember to set all one dimensional data arrays as column vector.
 
     %% Load input data from the JSON file
     JSON_data = jsondecode(fileread('input_data.json'));
 
     % The initial design variables (transformed to column vector)
-    x = (JSON_data.x0).';
+    % x = JSON_data.x0;
+
+    % The lower and upper limits of the design variables
+    x_min = JSON_data.x_min;
+    x_max = JSON_data.x_max;
 
     % The bar lengths
-    L = (JSON_data.L).';
+    L = JSON_data.L;
 
     % The nominal E
-    E = (JSON_data.E).';
+    E = JSON_data.E;
 
     % The DOFs of the loads
-    F_DOFs = (JSON_data.F_DOFs).';
+    F_DOFs = JSON_data.F_DOFs;
 
     % The values of the loads
-    F_value = (JSON_data.F_value).';
+    F_values = JSON_data.F_values;
+
+    % Calculate the loads vector
+    F = zeros(12, 1);
+    F(F_DOFs) = F_values;
+
+    % The fixed nodes
+    fixed_nodes = JSON_data.fixed_nodes;
 
     %% The rotation angles of the bars
     theta = [0, 0, 0, 0, pi / 2, pi / 2, pi / 4, pi * 3/4, pi / 4, pi * 3/4];
 
-    %% The local-to-global nodal information
+    %% The nodes information
     node_info = JSON_data.node_info;
 
-    % x = [0.003, 0.003, 0.003];
-    E = [2e6, 2e6, 2e6];
-    F = [100, 100];
+    % The fixed DOFs
+    fixed_DOFs = sort(cat(1, 2 * fixed_nodes - 1, 2 * fixed_nodes));
+    BCs.free_DOFs = setdiff(1:1:12, fixed_DOFs);
 
-    %% The deviations of the elasticity moduli
-    E_deviation = [2e5; 2e5; 2e5];
+    % The DOF of the concerned displacement
+    i_U = JSON_data.i_U;
+
+    %% The standard deviations of the elasticity moduli
+    E_sigma = JSON_data.E_sigma;
+
+    % The nominal perturbation on the elasticity moduli (zero mean)
+    delta_E = 0 * E_sigma;
+
+    %% The upper limit on the volume
+    V_max = JSON_data.V_max;
 
     %% The weighting factor of the RDO objective
     obj_beta = 1;
 
     %% The optimization parameters for the GA
-    A = [5, 5, 7.2];
-    b = 0.06;
+    A = L.';
+    b = V_max;
     Aeq = [];
     beq = [];
     nonlcon = [];
 
-    lb = [0.001 0.001 0.001];
-    ub = [0.01 0.01 0.01];
+    lb = x_min;
+    ub = x_max;
 
-    objective_fun = @(x) get_RDO_obj(x, E, E_deviation, F, obj_beta);
+    objective_fun = @(x) get_RDO_obj(BCs, x, E, delta_E, L, theta, node_info, F, E_sigma, i_U, obj_beta);
 
     options = optimoptions('ga', 'PlotFcn', @gaplotbestf);
 
     %% Implement the RDO using the GA
-    x_GA = ga(objective_fun, 3, A, b, Aeq, beq, lb, ub, nonlcon, options);
+    x_GA = ga(objective_fun, 10, A, b, Aeq, beq, lb, ub, nonlcon, options);
 
     %%
+    disp('   1          2          3          4          5          6          7          8          9          10');
     disp(x_GA);
+
+    %%
+    [~, Ui_mean, Ui_sigma] = get_RDO_obj(BCs, x_GA, E, delta_E, L, theta, node_info, F, E_sigma, i_U, obj_beta);
+
+    fprintf('Ui_mean = %7.2f; Ui_sigma = %7.2f\n', Ui_mean, Ui_sigma);
 
 end
 
 %% ------------------------------------------------- Local functions -------------------------------------------------
-function [u, D1_u] = get_U(x, E, F)
-    %% This local function calculates the concerned displacement
-    %
+function [RDO_obj, Ui_mean, Ui_sigma] = get_RDO_obj(BCs, x, E, delta_E, L, theta, node_info, F, E_sigma, i_U, obj_beta)
+    %% This function calculates the objective of the RDO
     % Input:
-    %       x: The design variables vector (the sectional areas)
-    %       E: The elasticity moduli vector
-    %       F: The loads vector
-    %
+    %       See the corresponding comments in the main function and the subroutines
     % Output:
-    %       u: The value of the concerned displacement
-    %       D1_u: The first derivative of the concerned displacement with respect to the random parameters
+    %       RDO_obj: The objective value of the RDO
 
     %%
-    u = (F(1) * (-2.604166667 * x(1) * E(1) + 2.604166667 * x(2) * E(2) + 1.708984375 * x(3) * E(3)) + ...
-        F(2) * (1.953125 * x(1) * E(1) + 1.953125 * x(2) * E(2) + 2.604166667 * x(3) * E(3))) / ...
-        (x(1) * x(2) * E(1) * E(2) + 0.7434895833 * x(1) * x(3) * E(1) * E(3) + 0.08723958333 * x(2) * x(3) * E(2) * E(3) + 0.001708984375 * x(3)^2 * E(3)^2);
-
-    if nargout > 1
-        D1_u = zeros(3, 1);
-
-        D1_u(1) = (-2.604166667 * F(1) * x(1) + 1.953125 * F(2) * x(1)) / (x(1) * x(2) * E(1) * E(2) + 0.7434895833 * x(1) * x(3) * E(1) * E(3) + 0.08723958333 * x(2) * x(3) * E(2) * E(3) + 0.001708984375 * x(3)^2 * E(3)^2) - ...
-            ((x(1) * x(2) * E(2) + 0.7434895833 * x(1) * x(3) * E(3)) * (F(1) * (-2.604166667 * x(1) * E(1) + 2.604166667 * x(2) * E(2) + 1.708984375 * x(3) * E(3)) + F(2) * (1.953125 * x(1) * E(1) + 1.953125 * x(2) * E(2) + 2.604166667 * x(3) * E(3)))) / ...
-            (x(1) * x(2) * E(1) * E(2) + 0.7434895833 * x(1) * x(3) * E(1) * E(3) + 0.08723958333 * x(2) * x(3) * E(2) * E(3) + 0.001708984375 * x(3)^2 * E(3)^2)^2;
-
-        D1_u(2) = (2.604166667 * F(1) * x(2) + 1.953125 * F(2) * x(2)) / (x(1) * x(2) * E(1) * E(2) + 0.7434895833 * x(1) * x(3) * E(1) * E(3) + 0.08723958333 * x(2) * x(3) * E(2) * E(3) + 0.001708984375 * x(3)^2 * E(3)^2) - ...
-            ((x(1) * x(2) * E(1) + 0.08723958333 * x(2) * x(3) * E(3)) * (F(1) * (-2.604166667 * x(1) * E(1) + 2.604166667 * x(2) * E(2) + 1.708984375 * x(3) * E(3)) + F(2) * (1.953125 * x(1) * E(1) + 1.953125 * x(2) * E(2) + 2.604166667 * x(3) * E(3)))) / ...
-            (x(1) * x(2) * E(1) * E(2) + 0.7434895833 * x(1) * x(3) * E(1) * E(3) + 0.08723958333 * x(2) * x(3) * E(2) * E(3) + 0.001708984375 * x(3)^2 * E(3)^2)^2;
-
-        D1_u(3) = (1.708984375 * F(1) * x(3) + 2.604166667 * F(2) * x(3)) / (x(1) * x(2) * E(1) * E(2) + 0.7434895833 * x(1) * x(3) * E(1) * E(3) + 0.08723958333 * x(2) * x(3) * E(2) * E(3) + 0.001708984375 * x(3)^2 * E(3)^2) - ...
-            ((0.7434895833 * x(1) * x(3) * E(1) + 0.08723958333 * x(2) * x(3) * E(2) + 0.00341796875 * x(3)^2 * E(3)) * (F(1) * (-2.604166667 * x(1) * E(1) + 2.604166667 * x(2) * E(2) + 1.708984375 * x(3) * E(3)) + F(2) * (1.953125 * x(1) * E(1) + 1.953125 * x(2) * E(2) + 2.604166667 * x(3) * E(3)))) / ...
-            (x(1) * x(2) * E(1) * E(2) + 0.7434895833 * x(1) * x(3) * E(1) * E(3) + 0.08723958333 * x(2) * x(3) * E(2) * E(3) + 0.001708984375 * x(3)^2 * E(3)^2)^2;
-    end
-
-end
-
-function RDO_obj = get_RDO_obj(x, E, E_deviation, F, obj_beta)
-    %% This local function calculates the objective of the RDO
-
-    %% Calculate the objective function
-    [u, D1_u] = get_U(x, E, F);
-
-    u_mean = u;
-
-    u_deviation = sum(D1_u .* D1_u .* E_deviation);
+    [U, D_U_D_E] = FEA(BCs, x, E, delta_E, L, theta, node_info, F);
 
     %%
-    RDO_obj = u_mean + obj_beta * u_deviation;
+    Ui_mean = U(i_U);
 
+    %%
+    D_Ui_D_E = D_U_D_E(i_U, :);
+
+    Ui_square_sigma = D_Ui_D_E .* D_Ui_D_E * E_sigma.^2;
+
+    %%
+    RDO_obj = Ui_mean + obj_beta * Ui_square_sigma;
+
+    %%
+    Ui_sigma = sqrt(Ui_square_sigma);
 end
