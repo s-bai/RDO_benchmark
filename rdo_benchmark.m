@@ -55,7 +55,7 @@ function rdo_benchmark()
     V_max = JSON_data.V_max;
 
     %% The weighting factor of the RDO objective
-    obj_beta = 1;
+    obj_beta = [0, 1];
 
     %% The optimization parameters for the GA
     A = L.';
@@ -75,11 +75,12 @@ function rdo_benchmark()
     x_GA = ga(objective_fun, 10, A, b, Aeq, beq, lb, ub, nonlcon, options);
 
     %%
-    disp('   1          2          3          4          5          6          7          8          9          10');
-    disp(x_GA);
-
-    %%
     [~, Ui_mean, Ui_sigma] = get_RDO_obj(BCs, x_GA, E, delta_E, L, theta, node_info, F, E_sigma, i_U, obj_beta);
+
+    %% Print results to the screen
+    for ii = 1:10
+        fprintf('Bar #%d,  A%d = %.4f\n', ii, ii, x_GA(ii));
+    end
 
     fprintf('Ui_mean = %7.2f; Ui_sigma = %7.2f\n', Ui_mean, Ui_sigma);
 
@@ -105,8 +106,9 @@ function [RDO_obj, Ui_mean, Ui_sigma] = get_RDO_obj(BCs, x, E, delta_E, L, theta
     Ui_square_sigma = D_Ui_D_E .* D_Ui_D_E * E_sigma.^2;
 
     %%
-    RDO_obj = 0*Ui_mean + obj_beta * sqrt(Ui_square_sigma);
+    Ui_sigma = sqrt(Ui_square_sigma);
 
     %%
-    Ui_sigma = sqrt(Ui_square_sigma);
+    RDO_obj = obj_beta(1) * Ui_mean + obj_beta(2) * Ui_sigma;
+
 end
