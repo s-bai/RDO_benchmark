@@ -105,7 +105,7 @@ function [RDO_obj, Ui_mean, Ui_sigma] = get_RDO_obj(BCs, x, E, delta_E, L, theta
     Ui_square_sigma = D_Ui_D_E .* D_Ui_D_E * E_sigma.^2;
 
     %%
-    RDO_obj = Ui_mean + obj_beta * Ui_square_sigma;
+    RDO_obj = 0*Ui_mean + obj_beta * sqrt(Ui_square_sigma);
 
     %%
     Ui_sigma = sqrt(Ui_square_sigma);
